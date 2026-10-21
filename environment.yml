@@ -1,0 +1,20 @@
+name: DLgp
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - jupyterlab
+  - matplotlib
+  - numpy
+  - pandas
+  - pillow
+  - pip
+  - python=3.11
+  - rasterio
+  - scikit-image
+  - scipy
+  - tqdm
+  - pytorch
+  - torchvision
+  - pip:
+      - segmentation-models-pytorch
