@@ -232,3 +232,6 @@ __marimo__/
 
 # Modellgewichte
 *.pt
+
+# Archiv (veraltete Ansaetze, nicht im Repo)
+archiv/
