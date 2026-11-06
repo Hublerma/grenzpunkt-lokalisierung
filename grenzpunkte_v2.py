@@ -14,7 +14,7 @@ from matplotlib.path import Path
 from matplotlib.transforms import Bbox
 from PIL import Image, ImageDraw
 from torch import nn
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 from torchvision.transforms import v2
 
 from grenzpunkte import (BATCH_SIZE, DATENSATZ, GROESSE, RAND, SCHWELLE, ZIEL_DPI, ausschnitt_schneiden, detektieren,
@@ -29,7 +29,7 @@ LABEL_FREI_PX = 12  # px, um Labels wird immer gerechnet, auch wenn ein nicht di
 ZYKLUS = 15  # Epochen, bis das Abdeckungsraster einmal vollstaendig durchlaufen ist
 ANTEIL_300DPI = 0.5
 VAL_ABDECKUNG = 3000  # feste Stichprobe aus dem Abdeckungsraster der val-Plaene
-MODELLE = {"v1": ("unet.pt", 3), "v2": ("unet_v2.pt", 6)}  # Gewichte und Anzahl Eingangskanaele
+MODELLE = {"v1": ("unet.pt", 3), "v2": ("unet_v2_letzte.pt", 6)}  # Gewichte, Eingangskanaele; v2 = letzte Epoche
 normalize = v2.Normalize(mean=[0.485, 0.456, 0.406] * 2, std=[0.229, 0.224, 0.225] * 2)  # ImageNet, fuer beide Teile
 
 bce = nn.BCEWithLogitsLoss(reduction="none", pos_weight=torch.tensor(100.0, device=device))  # wie V1, pro Pixel
@@ -170,8 +170,9 @@ class AusschnittDataset(Dataset):
     def __len__(self):
         return len(self.ausschnitte)
 
-    def __getitem__(self, idx):
-        plan_id, spalte, zeile = self.ausschnitte[idx]
+    def __getitem__(self, ausschnitt):
+        """ausschnitt = (plan_id, spalte, zeile) aus self.ausschnitte (der AusschnittSampler liefert sie so)."""
+        plan_id, spalte, zeile = ausschnitt
         plan = self.plaene[plan_id]
         faktor = plan["faktor"]
         if plan_id not in self.geotiffs:
@@ -191,6 +192,27 @@ class AusschnittDataset(Dataset):
             if random.random() < 0.5:
                 image, label, maske = (t.flip(2) for t in (image, label, maske))
         return normalize(image), label, maske
+
+
+class AusschnittSampler(Sampler):
+    """Gibt dem DataLoader statt Indizes die Ausschnitte selbst, gelesen bei jedem Epochenstart im Hauptprozess.
+    Damit koennen die Worker-Prozesse ueber alle Epochen bestehen bleiben (persistent_workers=True), obwohl
+    epoche_vorbereiten die Liste jede Epoche neu zieht: Die Worker haben nur eine alte Kopie des Datasets, bekommen
+    die aktuellen Ausschnitte aber einzeln vom Sampler. Neue Worker in jeder Epoche lassen unter macOS jedes Mal
+    Dateien offen, bis das Training mit "Too many open files" abbricht."""
+
+    def __init__(self, dataset, shuffle=False):
+        self.dataset = dataset
+        self.shuffle = shuffle
+
+    def __len__(self):
+        return len(self.dataset.ausschnitte)
+
+    def __iter__(self):
+        ausschnitte = list(self.dataset.ausschnitte)
+        if self.shuffle:
+            random.shuffle(ausschnitte)
+        return iter(ausschnitte)
 
 
 def modell_laden(version="v2"):
